@@ -37,6 +37,35 @@ def symmetric_contrastive_loss(
     return 0.5 * (loss_i2t + loss_t2i)
 
 
+def masked_symmetric_contrastive_loss(
+    source_embeddings: torch.Tensor,
+    target_embeddings: torch.Tensor | None,
+    *,
+    temperature: float,
+    valid_mask: torch.Tensor | None = None,
+) -> torch.Tensor:
+    if target_embeddings is None:
+        return source_embeddings.new_tensor(0.0)
+    if source_embeddings.shape != target_embeddings.shape:
+        raise ValueError("Source and target embeddings must share the same shape.")
+
+    if valid_mask is None:
+        masked_source = source_embeddings
+        masked_target = target_embeddings
+    else:
+        mask = valid_mask.to(device=source_embeddings.device, dtype=torch.bool)
+        if mask.ndim != 1 or mask.shape[0] != source_embeddings.shape[0]:
+            raise ValueError("valid_mask must be a 1D tensor matching the batch dimension.")
+        masked_source = source_embeddings[mask]
+        masked_target = target_embeddings[mask]
+
+    return symmetric_contrastive_loss(
+        masked_source,
+        masked_target,
+        temperature=temperature,
+    )
+
+
 def masked_cross_entropy_loss(
     logits: torch.Tensor,
     targets: torch.Tensor,

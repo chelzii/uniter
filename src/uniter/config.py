@@ -101,6 +101,7 @@ class AlignmentConfig:
 @dataclass(slots=True)
 class LossConfig:
     alignment_weight: float = 1.0
+    identity_weight: float = 1.0
     sentiment_weight: float = 1.0
     historical_sentiment_weight: float = 1.0
     lost_space_weight: float = 1.0

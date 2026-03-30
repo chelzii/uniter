@@ -1,19 +1,19 @@
 [experiment]
-name = "lost-space-space-meaning-v1"
+name = "kaitong-west-lane-single-region-bootstrap"
 seed = 42
 device = "auto"
-output_dir = "../outputs/space_meaning_v1"
+output_dir = "../outputs/kaitong_west_lane_single_region"
 
 [data]
 manifest_path = "../data/regions.jsonl"
-image_root = "../data"
+image_root = ""
 batch_size = 2
 num_workers = 0
 image_size = 512
-max_images_per_region = 4
-max_current_texts_per_region = 8
-max_historical_texts_per_region = 4
-max_identity_texts_per_region = 6
+max_images_per_region = 10
+max_current_texts_per_region = 24
+max_historical_texts_per_region = 5
+max_identity_texts_per_region = 7
 check_files_on_load = true
 
 [spatial_model]
@@ -32,7 +32,7 @@ max_length = 256
 pooling = "mean"
 
 [sentiment]
-enabled = true
+enabled = false
 num_classes = 3
 class_names = ["negative", "neutral", "positive"]
 dropout = 0.1
@@ -53,24 +53,24 @@ temperature = 0.07
 [losses]
 alignment_weight = 1.0
 identity_weight = 1.0
-sentiment_weight = 1.0
-historical_sentiment_weight = 1.0
-lost_space_weight = 1.0
-segmentation_weight = 1.0
+sentiment_weight = 0.0
+historical_sentiment_weight = 0.0
+lost_space_weight = 0.0
+segmentation_weight = 0.0
 sentiment_label_smoothing = 0.0
 
 [training]
-epochs = 10
+epochs = 20
 learning_rate = 0.00003
 weight_decay = 0.0001
 grad_clip_norm = 1.0
-log_every = 10
+log_every = 1
 amp = true
 save_every = 1
 save_best = true
-monitor_metric = "val.loss"
+monitor_metric = "train.loss"
 maximize_monitor_metric = false
-early_stopping_patience = 3
+early_stopping_patience = 5
 resume_from = ""
 
 [metrics]
@@ -121,7 +121,7 @@ enabled = true
 rule_weight = 0.65
 model_weight = 0.35
 minimum_model_confidence = 0.55
-use_iai = false
+use_iai = true
 iai_weight = 0.15
 
 [calibration]
@@ -131,7 +131,7 @@ severe_quantile = 0.85
 min_samples = 10
 
 [identity]
-enabled = false
+enabled = true
 projection_dropout = 0.1
 
 [inference]

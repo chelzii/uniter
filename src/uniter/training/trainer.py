@@ -17,6 +17,7 @@ from uniter.models.multimodal import ModelOutputs, MultimodalRegionModel
 from uniter.training.losses import (
     masked_accuracy,
     masked_cross_entropy_loss,
+    masked_symmetric_contrastive_loss,
     segmentation_cross_entropy_loss,
     symmetric_contrastive_loss,
 )
@@ -29,6 +30,7 @@ from uniter.utils.seed import set_seed
 class LossBreakdown:
     total: torch.Tensor
     alignment: torch.Tensor
+    identity: torch.Tensor
     segmentation: torch.Tensor
     sentiment: torch.Tensor
     historical_sentiment: torch.Tensor
@@ -210,6 +212,7 @@ class Trainer:
         self.model.train(mode=training)
         total_loss = 0.0
         total_alignment_loss = 0.0
+        total_identity_loss = 0.0
         total_segmentation_loss = 0.0
         total_sentiment_loss = 0.0
         total_historical_sentiment_loss = 0.0
@@ -264,6 +267,7 @@ class Trainer:
 
                 total_loss += float(losses.total.detach().cpu())
                 total_alignment_loss += float(losses.alignment.detach().cpu())
+                total_identity_loss += float(losses.identity.detach().cpu())
                 total_segmentation_loss += float(losses.segmentation.detach().cpu())
                 total_sentiment_loss += float(losses.sentiment.detach().cpu())
                 total_historical_sentiment_loss += float(
@@ -326,7 +330,7 @@ class Trainer:
                     self.logger.info(
                         (
                             "epoch=%d split=%s step=%d loss=%.4f alignment=%.4f "
-                            "segmentation=%.4f sentiment=%.4f historical_sentiment=%.4f "
+                            "identity=%.4f segmentation=%.4f sentiment=%.4f historical_sentiment=%.4f "
                             "lost_space=%.4f labeled_regions=%d historical_labeled_regions=%d "
                             "lost_space_labeled_regions=%d segmentation_labeled_images=%d"
                         ),
@@ -335,6 +339,7 @@ class Trainer:
                         step,
                         float(losses.total.detach().cpu()),
                         float(losses.alignment.detach().cpu()),
+                        float(losses.identity.detach().cpu()),
                         float(losses.segmentation.detach().cpu()),
                         float(losses.sentiment.detach().cpu()),
                         float(losses.historical_sentiment.detach().cpu()),
@@ -349,6 +354,7 @@ class Trainer:
         return {
             "loss": total_loss / divisor,
             "alignment_loss": total_alignment_loss / divisor,
+            "identity_loss": total_identity_loss / divisor,
             "segmentation_loss": total_segmentation_loss / max(segmentation_batches, 1),
             "sentiment_loss": total_sentiment_loss / max(sentiment_batches, 1),
             "historical_sentiment_loss": (
@@ -376,6 +382,15 @@ class Trainer:
             outputs.image_embeddings,
             outputs.text_embeddings,
             temperature=self.config.alignment.temperature,
+        )
+        identity_alignment_loss = masked_symmetric_contrastive_loss(
+            torch.nn.functional.normalize(
+                outputs.image_embeddings + outputs.text_embeddings,
+                dim=-1,
+            ),
+            outputs.identity_embeddings,
+            temperature=self.config.alignment.temperature,
+            valid_mask=outputs.identity_region_mask,
         )
         segmentation_result = segmentation_cross_entropy_loss(
             outputs.segmentation_logits,
@@ -421,6 +436,7 @@ class Trainer:
 
         total_loss = (
             alignment_loss * self.config.losses.alignment_weight
+            + identity_alignment_loss * self.config.losses.identity_weight
             + segmentation_result.loss * self.config.losses.segmentation_weight
             + sentiment_loss * self.config.losses.sentiment_weight
             + historical_sentiment_loss * self.config.losses.historical_sentiment_weight
@@ -429,6 +445,7 @@ class Trainer:
         return LossBreakdown(
             total=total_loss,
             alignment=alignment_loss,
+            identity=identity_alignment_loss,
             segmentation=segmentation_result.loss,
             sentiment=sentiment_loss,
             historical_sentiment=historical_sentiment_loss,
