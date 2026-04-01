@@ -13,4 +13,4 @@ env \
   -u HTTPS_PROXY \
   -u http_proxy \
   -u https_proxy \
-  uv run python -m uniter.cli train --config configs/kaitong_west_lane_single_region.toml "$@"
+  uv run python -m uniter.cli train --config configs/kaitong_west_lane_single_region.yaml "$@"

@@ -1,0 +1,12 @@
+extends: base.yaml
+
+experiment:
+  name: kaitong-west-lane-single-region-bootstrap
+
+losses:
+  segmentation_weight: 0.0
+
+training:
+  epochs: 20
+  log_every: 1
+  early_stopping_patience: 5

@@ -1,0 +1,132 @@
+experiment:
+  name: lost-space-base
+  seed: 42
+  device: auto
+  output_root: ../runs/train
+
+data:
+  manifest_path: ../data/regions.jsonl
+  image_root: ""
+  batch_size: 2
+  num_workers: 0
+  image_size: 512
+  max_images_per_region: 25
+  max_current_texts_per_region: 41
+  max_historical_texts_per_region: 5
+  max_identity_texts_per_region: 7
+  check_files_on_load: true
+
+spatial_model:
+  model_name: nvidia/segformer-b2-finetuned-cityscapes-1024-1024
+  freeze_encoder: true
+
+spatial_supervision:
+  enabled: false
+  ignore_index: 255
+  label_mapping: {}
+
+text_model:
+  model_name: hfl/chinese-macbert-base
+  freeze_encoder: true
+  max_length: 256
+  pooling: mean
+
+sentiment:
+  enabled: true
+  num_classes: 3
+  class_names: [negative, neutral, positive]
+  dropout: 0.1
+  ignore_index: -100
+
+lost_space:
+  enabled: true
+  num_classes: 4
+  class_names: [none, light, moderate, severe]
+  dropout: 0.1
+  ignore_index: -100
+
+alignment:
+  embed_dim: 256
+  projection_dropout: 0.1
+  temperature: 0.07
+
+losses:
+  alignment_weight: 1.0
+  identity_weight: 1.0
+  sentiment_weight: 1.0
+  historical_sentiment_weight: 1.0
+  lost_space_weight: 1.0
+  segmentation_weight: 1.0
+  sentiment_label_smoothing: 0.0
+
+training:
+  epochs: 10
+  learning_rate: 0.00003
+  weight_decay: 0.0001
+  grad_clip_norm: 1.0
+  log_every: 10
+  amp: true
+  save_every: 1
+  save_best: true
+  monitor_metric: val.loss
+  maximize_monitor_metric: false
+  early_stopping_patience: 3
+  resume_from: ""
+
+metrics:
+  mdi_normalizer: 1.0
+  iai_normalizer: 1.0
+  ifi_target_profile:
+    road_surface: 0.22
+    enclosure: 0.28
+    vegetation: 0.18
+    sky: 0.20
+    mobility: 0.08
+    pedestrian: 0.04
+  ifi_weights:
+    road_surface: 1.0
+    enclosure: 1.2
+    vegetation: 1.1
+    sky: 0.8
+    mobility: 1.1
+    pedestrian: 0.8
+
+judgement:
+  use_alignment_gap: true
+  ifi:
+    light: 0.20
+    moderate: 0.35
+    severe: 0.50
+  mdi:
+    light: 0.20
+    moderate: 0.35
+    severe: 0.50
+  iai:
+    light: 0.20
+    moderate: 0.35
+    severe: 0.50
+  alignment_gap:
+    light: 0.25
+    moderate: 0.40
+    severe: 0.55
+
+judgement_fusion:
+  enabled: true
+  rule_weight: 0.65
+  model_weight: 0.35
+  minimum_model_confidence: 0.55
+  use_iai: true
+  iai_weight: 0.15
+
+calibration:
+  light_quantile: 0.50
+  moderate_quantile: 0.70
+  severe_quantile: 0.85
+  min_samples: 10
+
+identity:
+  enabled: true
+  projection_dropout: 0.1
+
+inference:
+  require_checkpoint: true

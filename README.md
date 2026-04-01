@@ -35,7 +35,8 @@
 ```text
 .
 ├── configs/
-│   └── base.toml
+│   ├── base.yaml
+│   └── kaitong_west_lane_single_region.yaml
 ├── data/
 │   └── templates/
 │       └── region_manifest.example.jsonl
@@ -157,10 +158,22 @@ data/
 
 ## 配置
 
-基础配置文件在 [configs/base.toml](/home/chelizi/project/uniter/configs/base.toml)。
+基础配置文件在 [base.yaml](/home/chelizi/project/uniter/configs/base.yaml)。
+
+当前实验配置用 YAML 管理，并支持 `extends` 继承。推荐做法是：
+
+- `base.yaml` 只保留公共训练基线
+- 每个实验单独写一个 YAML
+- 通过 `experiment.name` 自动落盘到 `runs/train/<experiment.name>/`
+
+例如当前单区域实验配置是 [kaitong_west_lane_single_region.yaml](/home/chelizi/project/uniter/configs/kaitong_west_lane_single_region.yaml)。
 
 当前关键配置包括：
 
+- `experiment.name`
+  当前实验名。训练日志、checkpoint、summary、评估结果、导出结果默认统一保存到 `runs/train/<experiment.name>/`
+- `experiment.output_root`
+  实验输出根目录，默认建议保持为 `runs/train`
 - `data.manifest_path`
   你的真实区域样本 manifest 路径
 - `spatial_model.model_name`
@@ -204,7 +217,7 @@ uv sync
 查看解析后的默认配置：
 
 ```bash
-PYTHONPATH=src python3 -m uniter.cli describe-config
+PYTHONPATH=src python3 -m uniter.cli describe-config configs/kaitong_west_lane_single_region.yaml
 ```
 
 校验 manifest 结构：
@@ -241,33 +254,33 @@ PYTHONPATH=src python3 -m uniter.cli summarize-manifest data/regions.jsonl
 开始训练：
 
 ```bash
-PYTHONPATH=src python3 -m uniter.cli train --config configs/base.toml
+PYTHONPATH=src python3 -m uniter.cli train --config configs/kaitong_west_lane_single_region.yaml
 ```
 
 从 checkpoint 恢复训练：
 
 ```bash
 PYTHONPATH=src python3 -m uniter.cli train \
-  --config configs/base.toml \
-  --resume-from outputs/space_meaning_v1/checkpoints/epoch_005.pt
+  --config configs/kaitong_west_lane_single_region.yaml \
+  --resume-from runs/train/kaitong-west-lane-single-region-bootstrap/checkpoints/epoch_005.pt
 ```
 
 也可以直接运行：
 
 ```bash
-python3 main.py train --config configs/base.toml
+python3 main.py train --config configs/kaitong_west_lane_single_region.yaml
 ```
 
 导出 split 级评估汇总：
 
 ```bash
 PYTHONPATH=src python3 -m uniter.cli evaluate \
-  --config configs/base.toml \
-  --checkpoint outputs/space_meaning_v1/checkpoints/epoch_001.pt \
+  --config configs/kaitong_west_lane_single_region.yaml \
+  --checkpoint runs/train/kaitong-west-lane-single-region-bootstrap/checkpoints/best.pt \
   --split val
 ```
 
-默认会导出到 `outputs/.../evaluations/evaluation_<split>.json`，包含：
+默认会导出到 `runs/train/<experiment_name>/evaluations/evaluation_<split>.json`，包含：
 
 - `IFI / MDI / IAI / alignment_gap` 的数值汇总
 - `IFI` 各组分偏差汇总
@@ -282,23 +295,23 @@ PYTHONPATH=src python3 -m uniter.cli evaluate \
 
 ```bash
 PYTHONPATH=src python3 -m uniter.cli calibrate-thresholds \
-  --config configs/base.toml \
-  --checkpoint outputs/space_meaning_v1/checkpoints/epoch_001.pt \
+  --config configs/kaitong_west_lane_single_region.yaml \
+  --checkpoint runs/train/kaitong-west-lane-single-region-bootstrap/checkpoints/best.pt \
   --split train
 ```
 
-默认会导出到 `outputs/.../calibration/thresholds_<split>.json`，里面是按当前 split 分位点拟合出的 `IFI / MDI / alignment_gap` 轻中重阈值。
+默认会导出到 `runs/train/<experiment_name>/calibration/thresholds_<split>.json`，里面是按当前 split 分位点拟合出的 `IFI / MDI / alignment_gap` 轻中重阈值。
 
 导出区域指标表：
 
 ```bash
 PYTHONPATH=src python3 -m uniter.cli export-region-metrics \
-  --config configs/base.toml \
-  --checkpoint outputs/space_meaning_v1/checkpoints/epoch_001.pt \
+  --config configs/kaitong_west_lane_single_region.yaml \
+  --checkpoint runs/train/kaitong-west-lane-single-region-bootstrap/checkpoints/best.pt \
   --split all
 ```
 
-默认会导出到 `outputs/.../exports/region_metrics_all.csv`，包含每个区域的：
+默认会导出到 `runs/train/<experiment_name>/exports/region_metrics_all.csv`，包含每个区域的：
 
 - `IFI / MDI / IAI / alignment_gap`
 - `IFI` 组分 JSON 和 top groups
@@ -311,12 +324,12 @@ PYTHONPATH=src python3 -m uniter.cli export-region-metrics \
 
 ```bash
 PYTHONPATH=src python3 -m uniter.cli export-visualizations \
-  --config configs/base.toml \
-  --checkpoint outputs/space_meaning_v1/checkpoints/epoch_001.pt \
+  --config configs/kaitong_west_lane_single_region.yaml \
+  --checkpoint runs/train/kaitong-west-lane-single-region-bootstrap/checkpoints/best.pt \
   --split all
 ```
 
-默认会导出到 `outputs/.../visualizations/<split>/`，其中包括：
+默认会导出到 `runs/train/<experiment_name>/visualizations/<split>/`，其中包括：
 
 - 每个区域一个 `report.md`
 - 每张输入图像对应的语义分割叠图 `overlay_*.png`
@@ -327,8 +340,26 @@ PYTHONPATH=src python3 -m uniter.cli export-visualizations \
 
 ```bash
 PYTHONPATH=src python3 -m uniter.cli summarize-experiments \
-  --root outputs \
-  --output outputs/experiment_summary.json
+  --root runs/train \
+  --output runs/train/experiment_summary.json
+```
+
+所有训练相关产物现在统一落在：
+
+```text
+runs/
+└── train/
+    └── <experiment_name>/
+        ├── run.log
+        ├── resolved_config.yaml
+        ├── training_state.json
+        ├── best_checkpoint.json
+        ├── checkpoints/
+        ├── summaries/
+        ├── evaluations/
+        ├── exports/
+        ├── calibration/
+        └── visualizations/
 ```
 
 ## 当前实现包含什么
@@ -408,10 +439,10 @@ PYTHONPATH=src python3 -m uniter.cli summarize-experiments \
 
 输出目录里常见的结果文件包括：
 
-- `outputs/<experiment>/checkpoints/`
-- `outputs/<experiment>/summaries/history.json`
-- `outputs/<experiment>/evaluations/evaluation_<split>.json`
-- `outputs/<experiment>/exports/region_metrics_<split>.csv`
-- `outputs/<experiment>/visualizations/<split>/`
-- `outputs/<experiment>/calibration/thresholds_<split>.json`
-- `outputs/experiment_summary.json`
+- `runs/train/<experiment>/checkpoints/`
+- `runs/train/<experiment>/summaries/history.json`
+- `runs/train/<experiment>/evaluations/evaluation_<split>.json`
+- `runs/train/<experiment>/exports/region_metrics_<split>.csv`
+- `runs/train/<experiment>/visualizations/<split>/`
+- `runs/train/<experiment>/calibration/thresholds_<split>.json`
+- `runs/train/experiment_summary.json`

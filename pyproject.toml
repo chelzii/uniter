@@ -12,6 +12,7 @@ dependencies = [
     "Pillow>=10.0.0",
     "torch>=2.2.0",
     "transformers>=4.40.0",
+    "PyYAML>=6.0.0",
 ]
 
 [project.optional-dependencies]

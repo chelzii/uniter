@@ -1,11 +1,51 @@
+# Python
 .venv/
 __pycache__/
+*.py[cod]
 .pytest_cache/
 .ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+
+# Packaging
 dist/
 build/
 *.egg-info/
+src/*.egg-info/
+
+# Local environments and notebooks
+.python-version
+.ipynb_checkpoints/
+
+# Training outputs and local experiment artifacts
 outputs/
-data/
+runs/
+*.log
+
+# Data and annotations: keep only code/templates in git
+data/*
 !data/templates/
+!data/templates/**
 datasets/
+datasets.zip
+
+# Model weights and large binaries
+*.pt
+*.pth
+*.ckpt
+*.bin
+*.safetensors
+*.onnx
+
+# Large local archives
+*.zip
+*.tar
+*.tar.gz
+*.tgz
+*.7z
+*.rar
+
+# OS/editor noise
+.DS_Store
+Thumbs.db

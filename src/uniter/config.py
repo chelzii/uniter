@@ -1,9 +1,10 @@
 from __future__ import annotations
 
-import tomllib
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
+
+import yaml
 
 
 def _merge_dict(defaults: dict[str, Any], overrides: dict[str, Any]) -> dict[str, Any]:
@@ -21,7 +22,8 @@ class ExperimentConfig:
     name: str = "lost-space-base"
     seed: int = 42
     device: str = "auto"
-    output_dir: str = "outputs/default"
+    output_root: str = "runs/train"
+    output_dir: str = ""
 
 
 @dataclass(slots=True)
@@ -243,7 +245,17 @@ def _resolve_relative_path(
     return str((config_dir / candidate).resolve())
 
 
+def _find_project_root(start_dir: Path) -> Path:
+    current = start_dir.resolve()
+    for candidate in (current, *current.parents):
+        if (candidate / "pyproject.toml").exists():
+            return candidate
+    return start_dir.resolve()
+
+
 def _validate_config(config: AppConfig) -> AppConfig:
+    if not config.experiment.name.strip():
+        raise ValueError("experiment.name must be a non-empty string.")
     if config.data.batch_size < 1:
         raise ValueError("data.batch_size must be at least 1.")
     if config.data.num_workers < 0:
@@ -379,14 +391,35 @@ def _validate_config(config: AppConfig) -> AppConfig:
     return config
 
 
+def _load_yaml(path: Path) -> dict[str, Any]:
+    payload = yaml.safe_load(path.read_text(encoding="utf-8"))
+    if payload is None:
+        return {}
+    if not isinstance(payload, dict):
+        raise ValueError(f"Config root must be a mapping: {path}")
+    return payload
+
+
+def _load_config_payload(path: Path) -> dict[str, Any]:
+    payload = _load_yaml(path)
+    extends = payload.pop("extends", None)
+    if extends in (None, ""):
+        return payload
+    if not isinstance(extends, str):
+        raise ValueError("Config field 'extends' must be a relative YAML path string.")
+    base_path = (path.parent / extends).resolve()
+    base_payload = _load_config_payload(base_path)
+    return _merge_dict(base_payload, payload)
+
+
 def load_config(config_path: str | Path) -> AppConfig:
     path = Path(config_path)
-    with path.open("rb") as handle:
-        payload = tomllib.load(handle)
+    payload = _load_config_payload(path.resolve())
 
     defaults = asdict(DEFAULT_CONFIG)
     merged = _merge_dict(defaults, payload)
     config_dir = path.resolve().parent
+    project_root = _find_project_root(config_dir)
     merged["data"]["manifest_path"] = _resolve_relative_path(
         merged["data"]["manifest_path"],
         config_dir=config_dir,
@@ -395,10 +428,17 @@ def load_config(config_path: str | Path) -> AppConfig:
         merged["data"].get("image_root"),
         config_dir=config_dir,
     )
-    merged["experiment"]["output_dir"] = _resolve_relative_path(
-        merged["experiment"]["output_dir"],
+    raw_output_root = payload.get("experiment", {}).get("output_root")
+    merged["experiment"]["output_root"] = _resolve_relative_path(
+        raw_output_root,
         config_dir=config_dir,
-    ) or str((config_dir / "outputs/default").resolve())
+    ) or str((project_root / "runs" / "train").resolve())
+    merged["experiment"]["output_dir"] = _resolve_relative_path(
+        merged["experiment"].get("output_dir"),
+        config_dir=config_dir,
+    ) or str(
+        (Path(merged["experiment"]["output_root"]) / merged["experiment"]["name"]).resolve()
+    )
     merged["training"]["resume_from"] = _resolve_relative_path(
         merged["training"].get("resume_from"),
         config_dir=config_dir,

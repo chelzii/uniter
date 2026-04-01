@@ -9,6 +9,7 @@ from pathlib import Path
 from uniter.config import DEFAULT_CONFIG, load_config
 from uniter.data.manifest import validate_manifest
 from uniter.data.tools import build_manifest_from_directories, summarize_manifest
+from uniter.utils.config_io import write_resolved_config
 from uniter.utils.logging import configure_logging
 
 
@@ -20,7 +21,7 @@ def build_parser() -> argparse.ArgumentParser:
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     describe = subparsers.add_parser("describe-config", help="Print a resolved config file.")
-    describe.add_argument("config", nargs="?", default=None, help="Path to a TOML config file.")
+    describe.add_argument("config", nargs="?", default=None, help="Path to a YAML config file.")
 
     validate = subparsers.add_parser("validate-manifest", help="Validate a region manifest.")
     validate.add_argument("manifest", help="Path to the JSONL manifest.")
@@ -95,7 +96,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
 
     train = subparsers.add_parser("train", help="Train the multimodal base model.")
-    train.add_argument("--config", required=True, help="Path to a TOML config file.")
+    train.add_argument("--config", required=True, help="Path to a YAML config file.")
     train.add_argument(
         "--resume-from",
         default=None,
@@ -106,7 +107,7 @@ def build_parser() -> argparse.ArgumentParser:
         "evaluate",
         help="Evaluate a checkpoint and export split-level summary metrics as JSON.",
     )
-    evaluate.add_argument("--config", required=True, help="Path to a TOML config file.")
+    evaluate.add_argument("--config", required=True, help="Path to a YAML config file.")
     evaluate.add_argument(
         "--output",
         default=None,
@@ -133,7 +134,7 @@ def build_parser() -> argparse.ArgumentParser:
         "calibrate-thresholds",
         help="Estimate rule thresholds from a split and export them as JSON.",
     )
-    calibrate.add_argument("--config", required=True, help="Path to a TOML config file.")
+    calibrate.add_argument("--config", required=True, help="Path to a YAML config file.")
     calibrate.add_argument(
         "--output",
         default=None,
@@ -160,7 +161,7 @@ def build_parser() -> argparse.ArgumentParser:
         "export-region-metrics",
         help="Run region-level inference and export IFI/MDI/sentiment metrics as CSV.",
     )
-    export.add_argument("--config", required=True, help="Path to a TOML config file.")
+    export.add_argument("--config", required=True, help="Path to a YAML config file.")
     export.add_argument(
         "--output",
         default=None,
@@ -190,7 +191,7 @@ def build_parser() -> argparse.ArgumentParser:
         "export-visualizations",
         help="Export region reports, segmentation overlays, and training curves.",
     )
-    visualize.add_argument("--config", required=True, help="Path to a TOML config file.")
+    visualize.add_argument("--config", required=True, help="Path to a YAML config file.")
     visualize.add_argument(
         "--output-dir",
         default=None,
@@ -304,6 +305,7 @@ def command_train(config_path: str, *, resume_from: str | None) -> int:
     if resume_from is not None:
         config.training.resume_from = str(Path(resume_from).resolve())
     configure_logging(config.output_dir)
+    write_resolved_config(config, config.output_dir / "resolved_config.yaml")
 
     from uniter.training.trainer import Trainer
 
@@ -322,6 +324,7 @@ def command_evaluate(
 ) -> int:
     config = load_config(config_path)
     configure_logging(config.output_dir)
+    write_resolved_config(config, config.output_dir / "resolved_config.yaml")
 
     from uniter.inference.evaluator import RegionEvaluator
 
@@ -346,6 +349,7 @@ def command_calibrate_thresholds(
 ) -> int:
     config = load_config(config_path)
     configure_logging(config.output_dir)
+    write_resolved_config(config, config.output_dir / "resolved_config.yaml")
 
     from uniter.inference.calibration import ThresholdCalibrator
 
@@ -370,6 +374,7 @@ def command_export_region_metrics(
 ) -> int:
     config = load_config(config_path)
     configure_logging(config.output_dir)
+    write_resolved_config(config, config.output_dir / "resolved_config.yaml")
 
     from uniter.inference.exporter import RegionMetricExporter
 
@@ -394,6 +399,7 @@ def command_export_visualizations(
 ) -> int:
     config = load_config(config_path)
     configure_logging(config.output_dir)
+    write_resolved_config(config, config.output_dir / "resolved_config.yaml")
 
     from uniter.inference.visualization import VisualizationExporter
 
