@@ -28,6 +28,10 @@ def test_validate_manifest_rejects_common_schema_errors(tmp_path: Path) -> None:
                     '"segmentation_mask_paths":["a.png",null],"current_texts":["ok"],'
                     '"identity_texts":["", 1],"targets":{"iai":"bad"}}'
                 ),
+                (
+                    '{"region_id":"r5","split":"train","image_paths":["a.jpg"],'
+                    '"current_texts":["ok"],"current_sentiment_labels":[1,2]}'
+                ),
             ]
         ),
         encoding="utf-8",
@@ -50,6 +54,7 @@ def test_validate_manifest_rejects_common_schema_errors(tmp_path: Path) -> None:
     assert any("'segmentation_mask_paths' must match the length" in error for error in errors)
     assert any("'identity_texts' entry must be a non-empty string" in error for error in errors)
     assert any("target 'iai' must be a number or null" in error for error in errors)
+    assert any("'current_sentiment_labels' must match the length" in error for error in errors)
 
 
 def test_load_manifest_resolves_relative_image_paths(tmp_path: Path) -> None:
@@ -65,7 +70,8 @@ def test_load_manifest_resolves_relative_image_paths(tmp_path: Path) -> None:
         (
             '{"region_id":"region_a","split":"train","image_paths":["images/sample.jpg"],'
             '"segmentation_mask_paths":["images/sample.png"],'
-            '"current_texts":["text"],"identity_texts":["ritual axis"]}'
+            '"current_texts":["text"],"current_sentiment_labels":[2],'
+            '"identity_texts":["ritual axis"]}'
         ),
         encoding="utf-8",
     )
@@ -75,4 +81,5 @@ def test_load_manifest_resolves_relative_image_paths(tmp_path: Path) -> None:
     assert len(records) == 1
     assert records[0].image_paths == [image_path]
     assert records[0].segmentation_mask_paths == [mask_path]
+    assert records[0].current_sentiment_labels == [2]
     assert records[0].identity_texts == ["ritual axis"]

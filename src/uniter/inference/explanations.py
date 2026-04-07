@@ -16,9 +16,14 @@ def serialize_ifi_components(
         weighted_delta = float(
             component["weighted_delta"][region_index].detach().cpu().item()  # type: ignore[index]
         )
+        target_value = component["target"]
+        if hasattr(target_value, "detach"):
+            target = float(target_value[region_index].detach().cpu().item())  # type: ignore[index]
+        else:
+            target = float(target_value)
         serialized[group_name] = {
             "actual": actual,
-            "target": float(component["target"]),
+            "target": target,
             "abs_delta": abs_delta,
             "weighted_delta": weighted_delta,
             "weight": float(component["weight"]),

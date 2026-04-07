@@ -76,6 +76,65 @@ def summarize_experiment_directory(experiment_dir: str | Path) -> dict[str, Any]
     return summary
 
 
+def build_artifact_index(experiment_dir: str | Path) -> dict[str, Any]:
+    root = Path(experiment_dir).resolve()
+    groups = {
+        "checkpoints": sorted(
+            str(path.relative_to(root))
+            for path in (root / "checkpoints").glob("*.pt")
+        )
+        if (root / "checkpoints").exists()
+        else [],
+        "summaries": sorted(
+            str(path.relative_to(root))
+            for path in (root / "summaries").glob("*.json")
+        )
+        if (root / "summaries").exists()
+        else [],
+        "evaluations": sorted(
+            str(path.relative_to(root))
+            for path in (root / "evaluations").glob("*.json")
+        )
+        if (root / "evaluations").exists()
+        else [],
+        "calibration": sorted(
+            str(path.relative_to(root))
+            for path in (root / "calibration").glob("*.json")
+        )
+        if (root / "calibration").exists()
+        else [],
+        "exports": sorted(
+            str(path.relative_to(root))
+            for path in (root / "exports").glob("*")
+            if path.is_file()
+        )
+        if (root / "exports").exists()
+        else [],
+        "visualizations": sorted(
+            str(path.relative_to(root))
+            for path in (root / "visualizations").rglob("*")
+            if path.is_file()
+        )
+        if (root / "visualizations").exists()
+        else [],
+    }
+    return {
+        "experiment_dir": str(root),
+        "resolved_config": (
+            "resolved_config.yaml" if (root / "resolved_config.yaml").exists() else None
+        ),
+        "groups": groups,
+    }
+
+
+def write_artifact_index(experiment_dir: str | Path) -> Path:
+    root = Path(experiment_dir).resolve()
+    payload = build_artifact_index(root)
+    destination = root / "artifacts_index.json"
+    destination.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
+    return destination
+
+
 def summarize_experiments_root(root_dir: str | Path) -> dict[str, Any]:
     root = Path(root_dir).resolve()
     if not root.exists():

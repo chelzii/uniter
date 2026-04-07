@@ -2,7 +2,8 @@ from __future__ import annotations
 
 import torch
 from torch import nn
-from transformers import SegformerForSemanticSegmentation
+
+from uniter.models.huggingface import load_segformer
 
 
 class SpatialEncoder(nn.Module):
@@ -14,12 +15,23 @@ class SpatialEncoder(nn.Module):
     2. produce an image-level embedding by globally pooling class evidence
     """
 
-    def __init__(self, model_name: str, freeze_encoder: bool = True) -> None:
+    def __init__(
+        self,
+        model_name: str,
+        freeze_encoder: bool = True,
+        train_decode_head: bool = True,
+    ) -> None:
         super().__init__()
-        self.model = SegformerForSemanticSegmentation.from_pretrained(model_name)
+        self.model = load_segformer(
+            model_name,
+            use_safetensors=False,
+        )
         if freeze_encoder:
             for parameter in self.model.parameters():
                 parameter.requires_grad = False
+            if train_decode_head and hasattr(self.model, "decode_head"):
+                for parameter in self.model.decode_head.parameters():
+                    parameter.requires_grad = True
 
     @property
     def num_labels(self) -> int:

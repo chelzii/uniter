@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from uniter.config import AppConfig
+from uniter.inference.calibration import apply_calibrated_thresholds
 from uniter.inference.exporter import build_region_metric_rows
 from uniter.inference.judgement import map_rule_level_to_class_index
 from uniter.inference.runtime import InferenceRuntime
@@ -136,6 +137,63 @@ def _regression_summary(
         "label_count": len(pairs),
         "mae": sum(absolute_errors) / len(absolute_errors),
         "rmse": math.sqrt(sum(squared_errors) / len(squared_errors)),
+    }
+
+
+def _average_ranks(values: list[float]) -> list[float]:
+    ordered = sorted(enumerate(values), key=lambda item: item[1])
+    ranks = [0.0] * len(values)
+    index = 0
+    while index < len(ordered):
+        next_index = index + 1
+        while next_index < len(ordered) and ordered[next_index][1] == ordered[index][1]:
+            next_index += 1
+        average_rank = (index + next_index - 1) / 2.0 + 1.0
+        for position in range(index, next_index):
+            ranks[ordered[position][0]] = average_rank
+        index = next_index
+    return ranks
+
+
+def _pearson(xs: list[float], ys: list[float]) -> float | None:
+    if len(xs) != len(ys) or len(xs) < 2:
+        return None
+    mean_x = sum(xs) / len(xs)
+    mean_y = sum(ys) / len(ys)
+    centered_x = [value - mean_x for value in xs]
+    centered_y = [value - mean_y for value in ys]
+    denominator = math.sqrt(
+        sum(value * value for value in centered_x) * sum(value * value for value in centered_y)
+    )
+    if denominator <= 0.0:
+        return None
+    return sum(left * right for left, right in zip(centered_x, centered_y, strict=True)) / denominator
+
+
+def _rank_correlation_summary(
+    rows: list[dict[str, Any]],
+    *,
+    prediction_key: str,
+    target_key: str,
+) -> dict[str, float | int | None]:
+    predictions: list[float] = []
+    targets: list[float] = []
+    for row in rows:
+        prediction = row.get(prediction_key)
+        target = row.get(target_key)
+        if prediction is None or target is None:
+            continue
+        prediction_value = float(prediction)
+        target_value = float(target)
+        if math.isnan(prediction_value) or math.isnan(target_value):
+            continue
+        predictions.append(prediction_value)
+        targets.append(target_value)
+    if len(predictions) < 2:
+        return {"label_count": len(predictions), "spearman": None}
+    return {
+        "label_count": len(predictions),
+        "spearman": _pearson(_average_ranks(predictions), _average_ranks(targets)),
     }
 
 
@@ -274,6 +332,134 @@ def _ifi_component_summary(rows: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
+def _ifi_validation_summary(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    bucket_totals = {
+        "profile": [],
+        "historical_plan": [],
+        "geometry": [],
+    }
+    for row in rows:
+        raw_payload = row.get("ifi_components_json")
+        if not isinstance(raw_payload, str) or not raw_payload:
+            continue
+        try:
+            components = json.loads(raw_payload)
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(components, dict):
+            continue
+        profile_values: list[float] = []
+        plan_values: list[float] = []
+        geometry_values: list[float] = []
+        for group_name, values in components.items():
+            if not isinstance(values, dict):
+                continue
+            weighted_delta = float(values.get("weighted_delta", 0.0))
+            if group_name.startswith("historical_plan_"):
+                plan_values.append(weighted_delta)
+            elif "geometry" in group_name or "continuity" in group_name or "consistency" in group_name:
+                geometry_values.append(weighted_delta)
+            else:
+                profile_values.append(weighted_delta)
+        if profile_values:
+            bucket_totals["profile"].append(sum(profile_values) / len(profile_values))
+        if plan_values:
+            bucket_totals["historical_plan"].append(sum(plan_values) / len(plan_values))
+        if geometry_values:
+            bucket_totals["geometry"].append(sum(geometry_values) / len(geometry_values))
+
+    return {
+        "proxy_score": _numeric_summary([row.get("spatial_proxy_score") for row in rows]),
+        "lost_space_monotonicity": _rank_correlation_summary(
+            rows,
+            prediction_key="ifi",
+            target_key="lost_space_target",
+        ),
+        "component_fit": {
+            bucket: _numeric_summary(values)
+            for bucket, values in bucket_totals.items()
+        },
+    }
+
+
+def _mdi_validation_summary(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    narrative_modes: dict[str, int] = {}
+    for row in rows:
+        source = row.get("mdi_source")
+        if not isinstance(source, str):
+            continue
+        if "narrative" in source or "embedding" in source:
+            narrative_modes[source] = narrative_modes.get(source, 0) + 1
+    return {
+        "sentiment_gap_regression": _regression_summary(
+            rows,
+            prediction_key="mdi",
+            target_key="mdi_sentiment_gap_target",
+        ),
+        "sentiment_gap_monotonicity": _rank_correlation_summary(
+            rows,
+            prediction_key="mdi",
+            target_key="mdi_sentiment_gap_target",
+        ),
+        "lost_space_monotonicity": _rank_correlation_summary(
+            rows,
+            prediction_key="mdi",
+            target_key="lost_space_target",
+        ),
+        "narrative_mode_counts": narrative_modes,
+    }
+
+
+def _bootstrap_stability_summary(rows: list[dict[str, Any]]) -> dict[str, Any] | None:
+    grouped: dict[str, list[dict[str, Any]]] = {}
+    for row in rows:
+        parent_region_id = row.get("parent_region_id")
+        if not isinstance(parent_region_id, str) or not parent_region_id:
+            continue
+        grouped.setdefault(parent_region_id, []).append(row)
+    if len(grouped) != 1:
+        return None
+    parent_region_id, group_rows = next(iter(grouped.items()))
+    if len(group_rows) <= 1:
+        return None
+
+    def _spread(key: str) -> dict[str, float | int | None]:
+        cleaned = [
+            float(value)
+            for value in (row.get(key) for row in group_rows)
+            if value is not None and not math.isnan(float(value))
+        ]
+        if not cleaned:
+            return {"count": 0, "mean": None, "range": None, "std": None}
+        mean_value = sum(cleaned) / len(cleaned)
+        variance = sum((value - mean_value) ** 2 for value in cleaned) / len(cleaned)
+        return {
+            "count": len(cleaned),
+            "mean": mean_value,
+            "range": max(cleaned) - min(cleaned),
+            "std": math.sqrt(variance),
+        }
+
+    level_counts: dict[str, int] = {}
+    for row in group_rows:
+        level = str(row.get("lost_space_level"))
+        level_counts[level] = level_counts.get(level, 0) + 1
+
+    return {
+        "single_region_bootstrap": True,
+        "parent_region_id": parent_region_id,
+        "view_count": len(group_rows),
+        "level_counts": level_counts,
+        "metrics": {
+            "ifi": _spread("ifi"),
+            "mdi": _spread("mdi"),
+            "iai": _spread("iai"),
+            "alignment_gap": _spread("alignment_gap"),
+            "risk_score": _spread("risk_score"),
+        },
+    }
+
+
 def summarize_region_rows(
     rows: list[dict[str, Any]],
     *,
@@ -285,9 +471,13 @@ def summarize_region_rows(
     lost_space_names = lost_space_class_names or DEFAULT_LOST_SPACE_CLASS_NAMES
     level_counts: dict[str, int] = {}
     fusion_source_counts: dict[str, int] = {}
+    mdi_mode_counts: dict[str, int] = {}
     identity_available_count = 0
     agreement_count = 0
     disagreement_count = 0
+    sentiment_label_count = 0
+    historical_sentiment_label_count = 0
+    lost_space_label_count = 0
 
     for row in rows:
         level = str(row["lost_space_level"])
@@ -295,8 +485,17 @@ def summarize_region_rows(
         source = row.get("lost_space_fusion_source")
         if isinstance(source, str):
             fusion_source_counts[source] = fusion_source_counts.get(source, 0) + 1
+        mdi_mode = row.get("mdi_mode")
+        if isinstance(mdi_mode, str):
+            mdi_mode_counts[mdi_mode] = mdi_mode_counts.get(mdi_mode, 0) + 1
         if bool(row.get("identity_available")):
             identity_available_count += 1
+        if bool(row.get("has_sentiment_labels")):
+            sentiment_label_count += 1
+        if bool(row.get("has_historical_sentiment_labels")):
+            historical_sentiment_label_count += 1
+        if bool(row.get("has_lost_space_label")):
+            lost_space_label_count += 1
         agreement = row.get("lost_space_rule_model_agreement")
         if agreement is True:
             agreement_count += 1
@@ -304,13 +503,19 @@ def summarize_region_rows(
             disagreement_count += 1
 
     return {
+        "proxy_score": _numeric_summary([row.get("spatial_proxy_score") for row in rows]),
         "region_count": len(rows),
+        "bootstrap_stability": _bootstrap_stability_summary(rows),
         "metrics": {
             "ifi": _numeric_summary([row["ifi"] for row in rows]),
             "mdi": _numeric_summary([row["mdi"] for row in rows]),
             "iai": _numeric_summary([row.get("iai") for row in rows]),
             "alignment_gap": _numeric_summary([row["alignment_gap"] for row in rows]),
             "ifi_components": _ifi_component_summary(rows),
+        },
+        "indicator_validation": {
+            "ifi": _ifi_validation_summary(rows),
+            "mdi": _mdi_validation_summary(rows),
         },
         "identity": {
             "available_count": identity_available_count,
@@ -320,6 +525,12 @@ def summarize_region_rows(
                 prediction_key="iai",
                 target_key="iai_target",
             ),
+        },
+        "data_capability": {
+            "mdi_mode_counts": mdi_mode_counts,
+            "sentiment_label_count": sentiment_label_count,
+            "historical_sentiment_label_count": historical_sentiment_label_count,
+            "lost_space_label_count": lost_space_label_count,
         },
         "current_sentiment": _classification_summary(
             rows,
@@ -365,24 +576,47 @@ def summarize_region_rows(
                 class_names=lost_space_names,
             ),
         },
-        "segmentation": segmentation_summary
-        or {
-            "label_count": 0,
-            "labeled_images": 0,
-            "labeled_pixels": 0,
-            "pixel_accuracy": None,
-            "mIoU": None,
-            "mean_dice": None,
-            "per_class": [],
-            "confusion_matrix": None,
-        },
+        "segmentation": (
+            {
+                **(segmentation_summary or {}),
+                "proxy_score": _numeric_summary([row.get("spatial_proxy_score") for row in rows]),
+            }
+            if segmentation_summary is not None
+            else {
+                "label_count": 0,
+                "labeled_images": 0,
+                "labeled_pixels": 0,
+                "pixel_accuracy": None,
+                "mIoU": None,
+                "mean_dice": None,
+                "proxy_score": _numeric_summary([row.get("spatial_proxy_score") for row in rows]),
+                "per_class": [],
+                "confusion_matrix": None,
+            }
+        ),
     }
 
 
 class RegionEvaluator:
     def __init__(self, config: AppConfig) -> None:
         self.config = config
+        self.thresholds_path = apply_calibrated_thresholds(config)
         self.runtime = InferenceRuntime(config)
+        parent_region_ids = {
+            str(record.metadata.get("parent_region_id", "")).strip()
+            for record in self.runtime.records
+            if str(record.metadata.get("parent_region_id", "")).strip()
+        }
+        bootstrap_views = {
+            str(record.metadata.get("bootstrap_view", "")).strip()
+            for record in self.runtime.records
+            if str(record.metadata.get("bootstrap_view", "")).strip()
+        }
+        self.single_region_bootstrap = (
+            len(parent_region_ids) == 1
+            and len(self.runtime.records) > 1
+            and len(bootstrap_views) >= 1
+        )
 
     def evaluate(
         self,
@@ -412,17 +646,20 @@ class RegionEvaluator:
                     batch,
                     outputs,
                     split_by_region=self.runtime.split_by_region,
+                    single_region_bootstrap=self.single_region_bootstrap,
                     sentiment_class_names=self.config.sentiment.class_names,
                     sentiment_ignore_index=self.config.sentiment.ignore_index,
                     lost_space_class_names=self.config.lost_space.class_names,
                     lost_space_ignore_index=self.config.lost_space.ignore_index,
                     spatial_id2label=self.runtime.model.spatial_encoder.id2label,
                     config=self.config,
+                    manifest_path=self.config.data.manifest_path,
                 )
             )
 
         payload = {
             "split": split,
+            "thresholds_path": str(self.thresholds_path) if self.thresholds_path is not None else None,
             "summary": summarize_region_rows(
                 rows,
                 sentiment_class_names=self.config.sentiment.class_names,

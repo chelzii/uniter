@@ -7,7 +7,7 @@ from typing import Any
 
 from uniter.data.manifest import VALID_SPLITS, validate_manifest
 
-IMAGE_SUFFIXES = {".jpg", ".jpeg", ".png", ".bmp", ".webp"}
+IMAGE_SUFFIXES = {".jpg", ".jpeg", ".png", ".bmp", ".webp", ".tif", ".tiff"}
 TEXT_SUFFIXES = {".txt", ".json", ".jsonl"}
 
 

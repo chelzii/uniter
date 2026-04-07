@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 import torch
-from transformers import AutoModel
 
+from uniter.models.huggingface import load_text_model
 from uniter.models.pooling import masked_mean_pool
 
 
@@ -15,7 +15,7 @@ class TextEncoder(torch.nn.Module):
         freeze_encoder: bool = True,
     ) -> None:
         super().__init__()
-        self.encoder = AutoModel.from_pretrained(model_name)
+        self.encoder = load_text_model(model_name, use_safetensors=False)
         self.pooling = pooling
 
         if freeze_encoder:

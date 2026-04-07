@@ -29,12 +29,19 @@ class RegionBatch:
     pixel_values: Any
     segmentation_labels: Any | None
     image_region_index: Any
+    image_is_satellite: Any
+    image_point_ids: list[str]
+    image_view_directions: list[str]
+    image_longitudes: list[float | None]
+    image_latitudes: list[float | None]
     current_input_ids: Any
     current_attention_mask: Any
     current_region_index: Any
+    current_sentiment_labels: Any | None
     historical_input_ids: Any | None
     historical_attention_mask: Any | None
     historical_region_index: Any | None
+    historical_sentiment_labels: Any | None
     identity_input_ids: Any | None
     identity_attention_mask: Any | None
     identity_region_index: Any | None

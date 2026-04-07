@@ -32,7 +32,9 @@ class RegionRecord:
     image_paths: list[Path]
     current_texts: list[str]
     segmentation_mask_paths: list[Path | None] = field(default_factory=list)
+    current_sentiment_labels: list[int | None] = field(default_factory=list)
     historical_texts: list[str] = field(default_factory=list)
+    historical_sentiment_labels: list[int | None] = field(default_factory=list)
     identity_texts: list[str] = field(default_factory=list)
     metadata: dict[str, str | int | float | bool | None] = field(default_factory=dict)
     targets: RegionTargets = field(default_factory=RegionTargets)
@@ -135,9 +137,9 @@ def _validate_record_payload(payload: dict[str, object], *, line_number: int) ->
     elif "historical_texts" in payload:
         for text in payload["historical_texts"]:
             if not isinstance(text, str) or not text.strip():
-                    errors.append(
-                        f"line {line_number}: each 'historical_texts' entry must be a non-empty string"
-                    )
+                errors.append(
+                    f"line {line_number}: each 'historical_texts' entry must be a non-empty string"
+                )
 
     if "identity_texts" in payload and not isinstance(payload["identity_texts"], list):
         errors.append(f"line {line_number}: 'identity_texts' must be a list")
@@ -151,6 +153,27 @@ def _validate_record_payload(payload: dict[str, object], *, line_number: int) ->
     metadata = payload.get("metadata")
     if metadata is not None and not isinstance(metadata, dict):
         errors.append(f"line {line_number}: 'metadata' must be a JSON object")
+
+    for text_field, label_field in (
+        ("current_texts", "current_sentiment_labels"),
+        ("historical_texts", "historical_sentiment_labels"),
+    ):
+        if label_field not in payload:
+            continue
+        labels = payload[label_field]
+        if not isinstance(labels, list):
+            errors.append(f"line {line_number}: '{label_field}' must be a list")
+            continue
+        texts = payload.get(text_field, [])
+        if isinstance(texts, list) and len(labels) != len(texts):
+            errors.append(
+                f"line {line_number}: '{label_field}' must match the length of '{text_field}'"
+            )
+        for label in labels:
+            if label is not None and not _is_integer_target(label):
+                errors.append(
+                    f"line {line_number}: each '{label_field}' entry must be an integer or null"
+                )
 
     targets = payload.get("targets")
     if targets is not None:
@@ -230,8 +253,16 @@ def load_manifest(
                     image_paths=image_paths,
                     segmentation_mask_paths=segmentation_mask_paths,
                     current_texts=[str(text) for text in payload["current_texts"]],
+                    current_sentiment_labels=[
+                        int(label) if label is not None else None
+                        for label in payload.get("current_sentiment_labels", [])
+                    ],
                     historical_texts=[
                         str(text) for text in payload.get("historical_texts", [])
+                    ],
+                    historical_sentiment_labels=[
+                        int(label) if label is not None else None
+                        for label in payload.get("historical_sentiment_labels", [])
                     ],
                     identity_texts=[str(text) for text in payload.get("identity_texts", [])],
                     metadata=payload.get("metadata", {}),

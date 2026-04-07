@@ -10,6 +10,7 @@ def test_build_manifest_from_directories_creates_records_and_summary(tmp_path: P
     image_dir = tmp_path / "images" / "region_a"
     image_dir.mkdir(parents=True)
     (image_dir / "a.jpg").write_bytes(b"jpg")
+    (image_dir / "b.tif").write_bytes(b"tif")
     current_text_dir = tmp_path / "current"
     current_text_dir.mkdir()
     (current_text_dir / "region_a.txt").write_text("text one\ntext two\n", encoding="utf-8")
@@ -38,6 +39,7 @@ def test_build_manifest_from_directories_creates_records_and_summary(tmp_path: P
     assert len(content) == 1
     record = json.loads(content[0])
     assert record["region_id"] == "region_a"
+    assert record["image_paths"] == ["images/region_a/a.jpg", "images/region_a/b.tif"]
     assert record["current_texts"] == ["text one", "text two"]
     assert record["historical_texts"] == ["historic"]
     assert record["metadata"]["city"] == "西安"

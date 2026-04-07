@@ -7,11 +7,13 @@ def test_summarize_region_rows_aggregates_metrics_and_labels() -> None:
     summary = summarize_region_rows(
         [
             {
+                "parent_region_id": "parent_a",
                 "ifi": 0.4,
                 "mdi": 0.2,
                 "iai": None,
                 "iai_target": None,
                 "alignment_gap": 0.3,
+                "spatial_proxy_score": 0.25,
                 "ifi_components_json": (
                     '{"enclosure":{"actual":0.3,"target":0.2,'
                     '"abs_delta":0.1,"weighted_delta":0.12}}'
@@ -26,16 +28,20 @@ def test_summarize_region_rows_aggregates_metrics_and_labels() -> None:
                 "rule_lost_space_flag": True,
                 "lost_space_fusion_source": "rule+model",
                 "lost_space_rule_model_agreement": True,
+                "mdi_source": "sentiment_plus_narrative_drift",
+                "mdi_sentiment_gap_target": 0.5,
                 "identity_available": False,
                 "lost_space_model_pred": 2,
                 "lost_space_target": 1,
             },
             {
+                "parent_region_id": "parent_a",
                 "ifi": 0.1,
                 "mdi": None,
                 "iai": None,
                 "iai_target": None,
                 "alignment_gap": 0.2,
+                "spatial_proxy_score": 0.15,
                 "ifi_components_json": (
                     '{"sky":{"actual":0.1,"target":0.2,'
                     '"abs_delta":0.1,"weighted_delta":0.08}}'
@@ -70,3 +76,8 @@ def test_summarize_region_rows_aggregates_metrics_and_labels() -> None:
     assert summary["lost_space"]["model_metrics"]["macro_f1"] is not None
     assert summary["metrics"]["ifi_components"]["per_group"][0]["group"] in {"enclosure", "sky"}
     assert summary["identity"]["available_count"] == 1
+    assert summary["indicator_validation"]["ifi"]["proxy_score"]["count"] == 2
+    assert summary["indicator_validation"]["mdi"]["sentiment_gap_regression"]["label_count"] == 1
+    assert summary["segmentation"]["proxy_score"]["count"] == 2
+    assert summary["bootstrap_stability"]["single_region_bootstrap"] is True
+    assert summary["bootstrap_stability"]["metrics"]["ifi"]["count"] == 2

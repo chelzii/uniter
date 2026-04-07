@@ -11,6 +11,7 @@ import torch.nn.functional as F
 from PIL import Image
 
 from uniter.config import AppConfig
+from uniter.inference.calibration import apply_calibrated_thresholds
 from uniter.inference.exporter import build_region_metric_rows
 from uniter.inference.runtime import InferenceRuntime
 from uniter.utils.device import move_region_batch_to_device
@@ -87,12 +88,16 @@ def build_region_report_markdown(
         f"# Region Report: {row['region_id']}",
         "",
         f"- Split: `{row['split']}`",
+        f"- Primary level: `{row.get('primary_level', 'N/A')}`",
+        f"- Rule final level: `{row.get('rule_final_level', row['rule_lost_space_level'])}`",
+        f"- Final level: `{row.get('final_level', row['lost_space_level'])}`",
+        f"- Risk score: `{_format_index_value(row.get('risk_score'))}`",
         f"- Lost space flag: `{row['lost_space_flag']}`",
         f"- Lost space level: `{row['lost_space_level']}`",
         f"- Rule lost space level: `{row['rule_lost_space_level']}`",
         f"- Lost space model prediction: `{_optional_label(row['lost_space_model_pred_label'])}`",
         f"- Lost space fusion source: `{_optional_label(row.get('lost_space_fusion_source'))}`",
-        f"- MDI source: `{row['mdi_source']}`",
+        f"- MDI source: `{row.get('mdi_mode', row.get('mdi_source', 'N/A'))}`",
         _markdown_metric_line("IFI", row["ifi"], row["ifi_severity"]),
         _markdown_metric_line("MDI", row["mdi"], row["mdi_severity"]),
         _markdown_metric_line("IAI", row["iai"], row["iai_severity"]),
@@ -129,8 +134,21 @@ def build_region_report_markdown(
         "## Identity",
         "",
         f"- Identity available: `{row['identity_available']}`",
+        f"- Identity branch enabled: `{row.get('identity_enabled')}`",
         f"- IAI target: `{_format_index_value(row.get('iai_target'))}`",
         f"- IAI error: `{_format_index_value(row.get('iai_error'))}`",
+        "",
+        "## Data Context",
+        "",
+        f"- Image count: `{row.get('image_count')}`",
+        f"- Current text count: `{row.get('current_text_count')}`",
+        f"- Historical text count: `{row.get('historical_text_count')}`",
+        f"- Identity text count: `{row.get('identity_text_count')}`",
+        f"- Street images: `{row.get('street_image_count')}`",
+        f"- Satellite images: `{row.get('satellite_image_count')}`",
+        f"- Has view direction: `{row.get('has_view_direction')}`",
+        f"- Has spatial points: `{row.get('has_spatial_points')}`",
+        f"- Bad image skips: `{row.get('bad_image_skip_count')}`",
         "",
         "## Metadata",
         "",
@@ -150,13 +168,14 @@ def build_index_markdown(rows: Iterable[dict[str, Any]]) -> str:
     lines = [
         "# Region Visualization Index",
         "",
-        "| Region | Split | Level | IFI | MDI | Alignment | Report |",
-        "| --- | --- | --- | --- | --- | --- | --- |",
+        "| Region | Split | Final | Risk | IFI | MDI | Alignment | Report |",
+        "| --- | --- | --- | --- | --- | --- | --- | --- |",
     ]
     for row in rows:
         lines.append(
             "| "
-            f"{row['region_id']} | {row['split']} | {row['lost_space_level']} | "
+            f"{row['region_id']} | {row['split']} | {row.get('final_level', row['lost_space_level'])} | "
+            f"{_format_index_value(row.get('risk_score'))} | "
             f"{_format_index_value(row['ifi'])} | "
             f"{_format_index_value(row['mdi'])} | "
             f"{_format_index_value(row['alignment_gap'])} | "
@@ -271,6 +290,7 @@ def build_training_curves_svg(summaries: list[dict[str, Any]]) -> str:
 class VisualizationExporter:
     def __init__(self, config: AppConfig) -> None:
         self.config = config
+        self.thresholds_path = apply_calibrated_thresholds(config)
         self.runtime = InferenceRuntime(config)
 
     def export(
@@ -293,6 +313,21 @@ class VisualizationExporter:
         destination.mkdir(parents=True, exist_ok=True)
         rows: list[dict[str, Any]] = []
         loader = self.runtime.build_loader(records, batch_size=1)
+        parent_region_ids = {
+            str(item.metadata.get("parent_region_id", "")).strip()
+            for item in self.runtime.records
+            if str(item.metadata.get("parent_region_id", "")).strip()
+        }
+        bootstrap_views = {
+            str(item.metadata.get("bootstrap_view", "")).strip()
+            for item in self.runtime.records
+            if str(item.metadata.get("bootstrap_view", "")).strip()
+        }
+        single_region_bootstrap = (
+            len(parent_region_ids) == 1
+            and len(self.runtime.records) > 1
+            and len(bootstrap_views) >= 1
+        )
 
         self.runtime.model.eval()
         with torch.no_grad():
@@ -303,12 +338,14 @@ class VisualizationExporter:
                     batch,
                     outputs,
                     split_by_region=self.runtime.split_by_region,
+                    single_region_bootstrap=single_region_bootstrap,
                     sentiment_class_names=self.config.sentiment.class_names,
                     sentiment_ignore_index=self.config.sentiment.ignore_index,
                     lost_space_class_names=self.config.lost_space.class_names,
                     lost_space_ignore_index=self.config.lost_space.ignore_index,
                     spatial_id2label=self.runtime.model.spatial_encoder.id2label,
                     config=self.config,
+                    manifest_path=self.config.data.manifest_path,
                 )[0]
                 rows.append(row)
 

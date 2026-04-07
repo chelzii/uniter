@@ -44,6 +44,7 @@ class DataConfig:
 class SpatialModelConfig:
     model_name: str = "nvidia/segformer-b2-finetuned-cityscapes-1024-1024"
     freeze_encoder: bool = True
+    train_decode_head: bool = True
     label_groups: dict[str, list[str]] = field(
         default_factory=lambda: {
             "road_surface": ["road", "sidewalk"],
@@ -107,7 +108,9 @@ class LossConfig:
     sentiment_weight: float = 1.0
     historical_sentiment_weight: float = 1.0
     lost_space_weight: float = 1.0
+    lost_space_consistency_weight: float = 0.2
     segmentation_weight: float = 1.0
+    spatial_proxy_weight: float = 0.35
     sentiment_label_smoothing: float = 0.0
 
 
@@ -121,14 +124,15 @@ class TrainingConfig:
     amp: bool = True
     save_every: int = 1
     save_best: bool = True
-    monitor_metric: str = "val.loss"
-    maximize_monitor_metric: bool = False
+    monitor_metric: str = "val.selection_score"
+    maximize_monitor_metric: bool = True
     early_stopping_patience: int | None = None
     resume_from: str | None = None
 
 
 @dataclass(slots=True)
 class MetricConfig:
+    mdi_mode: str = "thesis"
     ifi_target_profile: dict[str, float] = field(
         default_factory=lambda: {
             "road_surface": 0.22,
@@ -149,7 +153,55 @@ class MetricConfig:
             "pedestrian": 0.8,
         }
     )
+    ifi_street_target_profile: dict[str, float] = field(
+        default_factory=lambda: {
+            "road_surface": 0.22,
+            "enclosure": 0.28,
+            "vegetation": 0.18,
+            "sky": 0.20,
+            "mobility": 0.08,
+            "pedestrian": 0.04,
+        }
+    )
+    ifi_street_weights: dict[str, float] = field(
+        default_factory=lambda: {
+            "road_surface": 1.0,
+            "enclosure": 1.2,
+            "vegetation": 1.1,
+            "sky": 0.8,
+            "mobility": 1.1,
+            "pedestrian": 0.8,
+        }
+    )
+    ifi_satellite_target_profile: dict[str, float] = field(
+        default_factory=lambda: {
+            "road_surface": 0.18,
+            "enclosure": 0.34,
+            "vegetation": 0.20,
+            "sky": 0.00,
+            "mobility": 0.06,
+            "pedestrian": 0.00,
+        }
+    )
+    ifi_satellite_weights: dict[str, float] = field(
+        default_factory=lambda: {
+            "road_surface": 1.2,
+            "enclosure": 1.2,
+            "vegetation": 1.15,
+            "sky": 0.0,
+            "mobility": 0.9,
+            "pedestrian": 0.0,
+        }
+    )
+    ifi_cross_view_weights: dict[str, float] = field(
+        default_factory=lambda: {
+            "street_boundary_continuity": 1.1,
+            "satellite_boundary_continuity": 0.8,
+            "street_satellite_consistency": 1.0,
+        }
+    )
     mdi_normalizer: float = 1.0
+    mdi_sentiment_weight: float = 0.7
     iai_normalizer: float = 1.0
 
 
@@ -162,6 +214,7 @@ class SeverityThresholdConfig:
 
 @dataclass(slots=True)
 class JudgementConfig:
+    rule_mode: str = "hybrid"
     use_alignment_gap: bool = True
     ifi: SeverityThresholdConfig = field(default_factory=SeverityThresholdConfig)
     mdi: SeverityThresholdConfig = field(default_factory=SeverityThresholdConfig)
@@ -178,11 +231,11 @@ class JudgementConfig:
 @dataclass(slots=True)
 class JudgementFusionConfig:
     enabled: bool = True
-    rule_weight: float = 0.65
-    model_weight: float = 0.35
-    minimum_model_confidence: float = 0.55
-    use_iai: bool = False
-    iai_weight: float = 0.15
+    rule_weight: float = 0.55
+    model_weight: float = 0.45
+    minimum_model_confidence: float = 0.45
+    use_iai: bool = True
+    iai_weight: float = 0.10
 
 
 @dataclass(slots=True)
@@ -191,6 +244,16 @@ class CalibrationConfig:
     moderate_quantile: float = 0.70
     severe_quantile: float = 0.85
     min_samples: int = 10
+    bootstrap_resamples: int = 256
+    partial_min_weight: float = 0.35
+    label_guided_search: bool = True
+    label_guided_min_labels: int = 2
+    label_guided_scale_candidates: list[float] = field(
+        default_factory=lambda: [0.40, 0.50, 0.55, 0.70, 0.85, 1.0, 1.15, 1.30, 1.50]
+    )
+    label_guided_identity_scale_candidates: list[float] = field(
+        default_factory=lambda: [1.0, 1.15, 1.30, 1.50, 1.75, 2.0, 2.25, 2.5]
+    )
 
 
 @dataclass(slots=True)
@@ -202,6 +265,7 @@ class IdentityConfig:
 @dataclass(slots=True)
 class InferenceConfig:
     require_checkpoint: bool = True
+    thresholds_path: str | None = None
 
 
 @dataclass(slots=True)
@@ -304,8 +368,12 @@ def _validate_config(config: AppConfig) -> AppConfig:
         raise ValueError("losses.historical_sentiment_weight must be non-negative.")
     if config.losses.lost_space_weight < 0.0:
         raise ValueError("losses.lost_space_weight must be non-negative.")
+    if config.losses.lost_space_consistency_weight < 0.0:
+        raise ValueError("losses.lost_space_consistency_weight must be non-negative.")
     if config.losses.segmentation_weight < 0.0:
         raise ValueError("losses.segmentation_weight must be non-negative.")
+    if config.losses.spatial_proxy_weight < 0.0:
+        raise ValueError("losses.spatial_proxy_weight must be non-negative.")
     if config.text_model.pooling not in {"mean", "cls"}:
         raise ValueError("text_model.pooling must be either 'mean' or 'cls'.")
     if config.text_model.max_length < 1:
@@ -322,8 +390,11 @@ def _validate_config(config: AppConfig) -> AppConfig:
         raise ValueError("training.log_every must be at least 1.")
     if config.training.save_every < 1:
         raise ValueError("training.save_every must be at least 1.")
-    if config.training.monitor_metric not in {"train.loss", "val.loss"}:
-        raise ValueError("training.monitor_metric must be either 'train.loss' or 'val.loss'.")
+    split_name, _, metric_name = config.training.monitor_metric.partition(".")
+    if split_name not in {"train", "val"} or not metric_name:
+        raise ValueError(
+            "training.monitor_metric must follow the pattern '<train|val>.<metric_name>'."
+        )
     if (
         config.training.early_stopping_patience is not None
         and config.training.early_stopping_patience < 1
@@ -331,8 +402,38 @@ def _validate_config(config: AppConfig) -> AppConfig:
         raise ValueError("training.early_stopping_patience must be at least 1 when set.")
     if config.calibration.min_samples < 1:
         raise ValueError("calibration.min_samples must be at least 1.")
+    if config.calibration.bootstrap_resamples < 1:
+        raise ValueError("calibration.bootstrap_resamples must be at least 1.")
+    if not 0.0 <= config.calibration.partial_min_weight <= 1.0:
+        raise ValueError("calibration.partial_min_weight must be in [0.0, 1.0].")
+    if config.calibration.label_guided_min_labels < 1:
+        raise ValueError("calibration.label_guided_min_labels must be at least 1.")
+    if not config.calibration.label_guided_scale_candidates:
+        raise ValueError("calibration.label_guided_scale_candidates must be non-empty.")
+    if not config.calibration.label_guided_identity_scale_candidates:
+        raise ValueError(
+            "calibration.label_guided_identity_scale_candidates must be non-empty."
+        )
+    for field_name, candidates in (
+        (
+            "calibration.label_guided_scale_candidates",
+            config.calibration.label_guided_scale_candidates,
+        ),
+        (
+            "calibration.label_guided_identity_scale_candidates",
+            config.calibration.label_guided_identity_scale_candidates,
+        ),
+    ):
+        if any(candidate <= 0.0 for candidate in candidates):
+            raise ValueError(f"{field_name} must only contain positive numbers.")
     if config.metrics.mdi_normalizer <= 0.0:
         raise ValueError("metrics.mdi_normalizer must be positive.")
+    if config.metrics.mdi_mode not in {"hybrid", "sentiment_first", "sentiment_only", "thesis"}:
+        raise ValueError(
+            "metrics.mdi_mode must be one of {'hybrid', 'sentiment_first', 'sentiment_only', 'thesis'}."
+        )
+    if not 0.0 <= config.metrics.mdi_sentiment_weight <= 1.0:
+        raise ValueError("metrics.mdi_sentiment_weight must be in [0.0, 1.0].")
     if config.metrics.iai_normalizer <= 0.0:
         raise ValueError("metrics.iai_normalizer must be positive.")
     if config.spatial_supervision.ignore_index < 0:
@@ -352,6 +453,8 @@ def _validate_config(config: AppConfig) -> AppConfig:
             )
     if not 0.0 <= config.identity.projection_dropout < 1.0:
         raise ValueError("identity.projection_dropout must be in [0.0, 1.0).")
+    if config.inference.thresholds_path is not None and not config.inference.thresholds_path.strip():
+        raise ValueError("inference.thresholds_path must be a non-empty path when set.")
     for section_name, thresholds in (
         ("judgement.ifi", config.judgement.ifi),
         ("judgement.mdi", config.judgement.mdi),
@@ -362,6 +465,8 @@ def _validate_config(config: AppConfig) -> AppConfig:
             raise ValueError(
                 f"{section_name} thresholds must satisfy light <= moderate <= severe."
             )
+    if config.judgement.rule_mode not in {"hybrid", "thesis"}:
+        raise ValueError("judgement.rule_mode must be either 'hybrid' or 'thesis'.")
     if config.judgement_fusion.rule_weight < 0.0:
         raise ValueError("judgement_fusion.rule_weight must be non-negative.")
     if config.judgement_fusion.model_weight < 0.0:
@@ -443,6 +548,10 @@ def load_config(config_path: str | Path) -> AppConfig:
         merged["training"].get("resume_from"),
         config_dir=config_dir,
     )
+    merged["inference"]["thresholds_path"] = _resolve_relative_path(
+        merged["inference"].get("thresholds_path"),
+        config_dir=config_dir,
+    )
 
     config = AppConfig(
         experiment=ExperimentConfig(**merged["experiment"]),
@@ -457,6 +566,7 @@ def load_config(config_path: str | Path) -> AppConfig:
         training=TrainingConfig(**merged["training"]),
         metrics=MetricConfig(**merged["metrics"]),
         judgement=JudgementConfig(
+            rule_mode=merged["judgement"].get("rule_mode", "hybrid"),
             use_alignment_gap=merged["judgement"]["use_alignment_gap"],
             ifi=SeverityThresholdConfig(**merged["judgement"]["ifi"]),
             mdi=SeverityThresholdConfig(**merged["judgement"]["mdi"]),

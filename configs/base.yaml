@@ -10,7 +10,7 @@ data:
   batch_size: 2
   num_workers: 0
   image_size: 512
-  max_images_per_region: 25
+  max_images_per_region: 2
   max_current_texts_per_region: 41
   max_historical_texts_per_region: 5
   max_identity_texts_per_region: 7
@@ -19,6 +19,7 @@ data:
 spatial_model:
   model_name: nvidia/segformer-b2-finetuned-cityscapes-1024-1024
   freeze_encoder: true
+  train_decode_head: true
 
 spatial_supervision:
   enabled: false
@@ -39,7 +40,7 @@ sentiment:
   ignore_index: -100
 
 lost_space:
-  enabled: true
+  enabled: false
   num_classes: 4
   class_names: [none, light, moderate, severe]
   dropout: 0.1
@@ -56,7 +57,9 @@ losses:
   sentiment_weight: 1.0
   historical_sentiment_weight: 1.0
   lost_space_weight: 1.0
+  lost_space_consistency_weight: 0.2
   segmentation_weight: 1.0
+  spatial_proxy_weight: 0.35
   sentiment_label_smoothing: 0.0
 
 training:
@@ -68,31 +71,52 @@ training:
   amp: true
   save_every: 1
   save_best: true
-  monitor_metric: val.loss
-  maximize_monitor_metric: false
+  monitor_metric: val.selection_score
+  maximize_monitor_metric: true
   early_stopping_patience: 3
   resume_from: ""
 
 metrics:
+  mdi_mode: thesis
   mdi_normalizer: 1.0
+  mdi_sentiment_weight: 0.7
   iai_normalizer: 1.0
-  ifi_target_profile:
+  ifi_street_target_profile:
     road_surface: 0.22
     enclosure: 0.28
     vegetation: 0.18
     sky: 0.20
     mobility: 0.08
     pedestrian: 0.04
-  ifi_weights:
+  ifi_street_weights:
     road_surface: 1.0
     enclosure: 1.2
     vegetation: 1.1
     sky: 0.8
     mobility: 1.1
     pedestrian: 0.8
+  ifi_satellite_target_profile:
+    road_surface: 0.18
+    enclosure: 0.34
+    vegetation: 0.20
+    sky: 0.00
+    mobility: 0.06
+    pedestrian: 0.00
+  ifi_satellite_weights:
+    road_surface: 1.2
+    enclosure: 1.2
+    vegetation: 1.15
+    sky: 0.0
+    mobility: 0.9
+    pedestrian: 0.0
+  ifi_cross_view_weights:
+    street_boundary_continuity: 1.1
+    satellite_boundary_continuity: 0.8
+    street_satellite_consistency: 1.0
 
 judgement:
-  use_alignment_gap: true
+  rule_mode: thesis
+  use_alignment_gap: false
   ifi:
     light: 0.20
     moderate: 0.35
@@ -111,18 +135,24 @@ judgement:
     severe: 0.55
 
 judgement_fusion:
-  enabled: true
-  rule_weight: 0.65
-  model_weight: 0.35
-  minimum_model_confidence: 0.55
+  enabled: false
+  rule_weight: 0.55
+  model_weight: 0.45
+  minimum_model_confidence: 0.45
   use_iai: true
-  iai_weight: 0.15
+  iai_weight: 0.10
 
 calibration:
   light_quantile: 0.50
   moderate_quantile: 0.70
   severe_quantile: 0.85
   min_samples: 10
+  bootstrap_resamples: 256
+  partial_min_weight: 0.35
+  label_guided_search: true
+  label_guided_min_labels: 2
+  label_guided_scale_candidates: [0.40, 0.50, 0.55, 0.70, 0.85, 1.0, 1.15, 1.30, 1.50]
+  label_guided_identity_scale_candidates: [1.0, 1.15, 1.30, 1.50, 1.75, 2.0, 2.25, 2.5]
 
 identity:
   enabled: true

@@ -141,6 +141,30 @@ def test_load_config_resolves_resume_from_relative_to_config(tmp_path: Path) -> 
     assert config.training.resume_from == str(checkpoint_path.resolve())
 
 
+def test_load_config_resolves_thresholds_path_relative_to_config(tmp_path: Path) -> None:
+    config_dir = tmp_path / "configs"
+    config_dir.mkdir()
+    calibration_dir = tmp_path / "calibration"
+    calibration_dir.mkdir()
+    threshold_path = calibration_dir / "thresholds_train.json"
+    threshold_path.write_text("{}", encoding="utf-8")
+
+    config_path = config_dir / "experiment.yaml"
+    config_path.write_text(
+        "\n".join(
+            [
+                "inference:",
+                "  thresholds_path: ../calibration/thresholds_train.json",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    config = load_config(config_path)
+
+    assert config.inference.thresholds_path == str(threshold_path.resolve())
+
+
 def test_load_config_rejects_invalid_judgement_fusion_confidence(tmp_path: Path) -> None:
     config_path = tmp_path / "invalid.yaml"
     config_path.write_text(
@@ -154,6 +178,54 @@ def test_load_config_rejects_invalid_judgement_fusion_confidence(tmp_path: Path)
     )
 
     with pytest.raises(ValueError, match="minimum_model_confidence must be in"):
+        load_config(config_path)
+
+
+def test_load_config_rejects_invalid_monitor_metric_pattern(tmp_path: Path) -> None:
+    config_path = tmp_path / "invalid.yaml"
+    config_path.write_text(
+        "\n".join(
+            [
+                "training:",
+                "  monitor_metric: test.loss",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="must follow the pattern"):
+        load_config(config_path)
+
+
+def test_load_config_rejects_invalid_mdi_mode(tmp_path: Path) -> None:
+    config_path = tmp_path / "invalid.yaml"
+    config_path.write_text(
+        "\n".join(
+            [
+                "metrics:",
+                "  mdi_mode: unknown",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="metrics.mdi_mode"):
+        load_config(config_path)
+
+
+def test_load_config_rejects_invalid_judgement_rule_mode(tmp_path: Path) -> None:
+    config_path = tmp_path / "invalid.yaml"
+    config_path.write_text(
+        "\n".join(
+            [
+                "judgement:",
+                "  rule_mode: unsupported",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="judgement.rule_mode"):
         load_config(config_path)
 
 
